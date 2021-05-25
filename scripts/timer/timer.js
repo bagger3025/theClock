@@ -3,7 +3,8 @@ const VALIDATED = "was-validated";
 let timerDict = {},
 	timerList = [],
 	intervalDict = {},
-	soundDict = {};
+	soundDict = {},
+	overTimer = [];
 
 let focusedID = 0,
 	previousID = 0;
@@ -583,7 +584,6 @@ function createDivEvents(div, item) {
 		if (!div.classList.contains("timer-focused")) div.focus();
 	});
 	timerTitle.addEventListener("dblclick", () => {
-		console.log(timerTitle.readOnly);
 		timerTitle.readOnly = "";
 		timerTitle.classList.add("get-input");
 	});
@@ -638,28 +638,40 @@ function createDivEvents(div, item) {
 	/* code from https://www.w3schools.com/howto/howto_js_draggable.asp */
 	mouseDraggable.addEventListener("mousedown", (e) => {
 		div.focus();
+
+		e = e || window.event;
+		e.preventDefault();
+
 		let pos1 = 0,
 			pos2 = 0,
-			pos3 = 0,
-			pos4 = 0,
+			pos2_f = 0,
+			pos3 = e.clientX,
+			pos4 = e.clientY,
+			posscroll = window.scrollY,
 			index = timerList.indexOf(parseInt(div.id));
 		const empty_div = createEmptyDiv(),
 			list = document.querySelector(".timer-list");
-		e = e || window.event;
-		e.preventDefault();
-		div.style.position = "absolute";
+
 		list.insertBefore(empty_div, div.nextSibling);
-		pos3 = e.clientX;
-		pos4 = e.clientY;
-		console.log(pos3, pos4);
+		div.style.position = "absolute";
+		div.style.top = div.offsetTop + "px";
+		div.style.width = div.offsetWidth - 100 + "px";
+
 		document.addEventListener("mouseup", closeDragElement);
 		document.addEventListener("mousemove", elementDrag);
-		const dragScrollevent = function (ele) {
-			console.log(ele);
-		};
-		document.addEventListener("scroll", dragScrollevent);
-		div.style.top = div.offsetTop - list.scrollTop + "px";
-		div.style.width = div.offsetWidth - 100 + "px";
+		document.addEventListener("scroll", moveDragging);
+
+		function moveDragging(ele) {
+			pos2 = pos2_f + posscroll - window.scrollY;
+			pos2_f = pos2 - Math.floor(pos2);
+
+			posscroll = window.scrollY;
+			div.style.top = div.offsetTop - Math.floor(pos2) + "px";
+			const divPos =
+				div.offsetTop - Math.floor(pos2) - empty_div.offsetTop;
+			moveAroundEmptydiv(divPos);
+		}
+
 		function elementDrag(ele) {
 			ele = ele || window.event;
 			ele.preventDefault();
@@ -670,54 +682,49 @@ function createDivEvents(div, item) {
 			div.style.top = div.offsetTop - pos2 + "px";
 			div.style.left = div.offsetLeft - pos1 + "px";
 
-			if (
-				div.offsetTop - pos2 - (empty_div.offsetTop - list.scrollTop) >
-				180
-			) {
-				if (
-					empty_div.nextSibling &&
-					!empty_div.nextSibling.classList.contains("timer-create")
-				) {
-					empty_div.before(empty_div.nextSibling);
-					[timerList[index], timerList[index + 1]] = [
-						timerList[index + 1],
-						timerList[index],
-					];
-					index++;
-					saveList();
+			const divPos = div.offsetTop - pos2 - empty_div.offsetTop;
+			moveAroundEmptydiv(divPos);
+		}
+		function moveAroundEmptydiv(divPos) {
+			const timerDictLength = Object.keys(timerList).length;
+			// move to top
+			if (divPos > 180 && index !== timerDictLength - 1) {
+				empty_div.before(empty_div.nextSibling);
+
+				[timerList[index], timerList[index + 1]] = [
+					timerList[index + 1],
+					timerList[index],
+				];
+				index++;
+				saveList();
+			}
+			// move to bottom
+			else if (divPos < -100 && index !== 0) {
+				if (empty_div.previousSibling === div) {
+					empty_div.after(empty_div.previousSibling.previousSibling);
+				} else {
+					empty_div.after(empty_div.previousSibling);
 				}
-			} else if (
-				div.offsetTop - pos2 - (empty_div.offsetTop - list.scrollTop) <
-				-100
-			) {
-				if (index !== 0) {
-					if (empty_div.previousSibling === div) {
-						empty_div.after(
-							empty_div.previousSibling.previousSibling
-						);
-					} else {
-						empty_div.after(empty_div.previousSibling);
-					}
-					[timerList[index], timerList[index - 1]] = [
-						timerList[index - 1],
-						timerList[index],
-					];
-					index--;
-					saveList();
-				}
+
+				[timerList[index], timerList[index - 1]] = [
+					timerList[index - 1],
+					timerList[index],
+				];
+				index--;
+				saveList();
 			}
 		}
 
 		function closeDragElement() {
 			document.removeEventListener("mouseup", closeDragElement);
 			document.removeEventListener("mousemove", elementDrag);
+			document.removeEventListener("scroll", moveDragging);
 			div.style.position = "";
 			div.style.top = "";
 			div.style.left = "";
 			div.style.width = "";
 			empty_div.before(div);
 			empty_div.remove();
-			document.removeEventListener("scroll", dragScrollevent);
 		}
 	});
 }
@@ -745,6 +752,15 @@ function barUpdate(bar, item) {
 			bar.style = `width: ${(finishTime * 100) / item.totalTime}%`;
 		}
 	}
+}
+
+function getOverTime(time) {
+	time = Math.floor(time / 1000);
+	const hour = Math.floor(time / 3600);
+	time %= 3600;
+	const minute = Math.floor(time / 60);
+	const second = time % 60;
+	return { hour, minute, second };
 }
 
 // Make timerdiv
@@ -776,6 +792,10 @@ function createDiv(id, item) {
 	const totalTime = item.running
 		? item.finishTime - Date.now()
 		: item.finishTime;
+	if (totalTime < 0) {
+		const overedtime = getOverTime(-totalTime);
+		overTimer.push({ id, overedtime });
+	}
 	setClockTotalTime(div.querySelector(".timer-time"), totalTime);
 
 	// Bar to screen
@@ -799,8 +819,10 @@ function createDiv(id, item) {
 	saveList();
 
 	// if it is running, automatically click start
-	if (item.running) {
+	if (item.running && totalTime > 0) {
 		div.querySelector(".timer-start").click();
+	} else if (item.running) {
+		div.querySelector(".timer-reset").click();
 	}
 }
 
@@ -841,9 +863,31 @@ function loadStorage() {
 		createDiv(itemList[i], itemDict[itemList[i]]);
 	}
 
-	console.log(document.querySelector(".timer-list").childNodes.length);
 	if (document.querySelector(".timer-list").childNodes.length === 0) {
 		createCurDiv();
+	}
+
+	if (overTimer.length !== 0) {
+		const myModalButton = document.getElementById("OvertimeAlarmButton"),
+			overTimeList = document
+				.getElementById("OvertimeAlarm")
+				.querySelector(".overTime-list");
+		for (let i = 0; i < overTimer.length; i++) {
+			const listElement = document.createElement("li");
+			let txt = "";
+			if (overTimer[i].overedtime.hour !== 0) {
+				txt = `${overTimer[i].overedtime.hour}h`;
+			}
+			listElement.innerText = `${
+				timerDict[overTimer[i].id].title
+			} : ${txt} ${overTimer[i].overedtime.minute}m ${
+				overTimer[i].overedtime.second
+			}s ago`;
+			overTimeList.append(listElement);
+		}
+		window.addEventListener("load", () => {
+			myModalButton.click();
+		});
 	}
 }
 
@@ -885,6 +929,7 @@ function timePlus(div, milliSeconds) {
 // keyboard input
 function keyboardSettings(event) {
 	const div = document.getElementById(focusedID);
+	if (!div) return;
 	if (
 		div.querySelector(".modal").classList.contains("show") ||
 		div.querySelector(".timer-title").classList.contains("get-input")
@@ -946,8 +991,6 @@ function loadBackground() {
 	document.querySelector("body").classList.add("timer-" + background);
 
 	globalBackground.addEventListener("change", (ele) => {
-		console.log(ele);
-		console.log("timer-" + ele.target.value);
 		document
 			.querySelector("body")
 			.classList.remove("timer-" + localStorage.getItem("background"));
